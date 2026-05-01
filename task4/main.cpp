@@ -103,8 +103,8 @@ int main(int argc, char *argv[]) {
   MPI_Allgather(sendbuf.data(), N, MPI_INT, recv_ref.data(), N, MPI_INT,
                 MPI_COMM_WORLD);
 
-  bool ring_ok = (recv_ring == recv_ref);
-  bool gb_ok = (recv_gb == recv_ref);
+  int ring_ok = (recv_ring == recv_ref);
+  int gb_ok = (recv_gb == recv_ref);
 
   if (myrank == 0) {
     printf("cpusize=%d\n", cpusize);
