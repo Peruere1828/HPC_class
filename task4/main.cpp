@@ -1,6 +1,10 @@
-#include <bits/stdc++.h>
+#include <ctype.h>
 #include <mpi.h>
-using namespace std;
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+typedef unsigned char byte;
 
 int cpusize, myrank;
 
@@ -35,7 +39,7 @@ void my_MPI_Allgather_ring(const void *sendbuf, int sendcount,
   }
 }
 
-// gather + bcast
+// gather + bcast (binary tree)
 void my_MPI_Gather(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
                    void *recvbuf, int recvcount, MPI_Datatype recvtype,
                    int root) {
@@ -84,47 +88,106 @@ void my_MPI_Allgather_gb(const void *sendbuf, int sendcount,
   my_MPI_Bcast(recvbuf, cpusize * recvcount, recvtype, 0);
 }
 
-int main(int argc, char *argv[]) {
+/* 校验: 第 j 块的值应等于 j + 1 */
+static void check(int nprocs, int myrank, size_t size, byte *buffer) {
+  size_t i, j;
+
+  for (j = 0; j < nprocs; j++)
+    for (i = 0; i < size; i++)
+      if (buffer[j * size + i] != ((j + 1) & 255)) {
+        fprintf(stderr,
+                "Process %d: incorrect value at block %zu, "
+                "position %zu\n",
+                myrank, j, i);
+        MPI_Abort(MPI_COMM_WORLD, 1);
+      }
+}
+
+int main(int argc, char **argv) {
+  int nprocs;
+  byte *send_buffer, *recv_buffer;
+  size_t size = 0;
+  double time0, time1;
+
   MPI_Init(&argc, &argv);
-  MPI_Comm_size(MPI_COMM_WORLD, &cpusize);
+  MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
   MPI_Comm_rank(MPI_COMM_WORLD, &myrank);
+  cpusize = nprocs;
 
-  const int N = 4;
-  vector<int> sendbuf(N);
-  vector<int> recv_ring(cpusize * N), recv_gb(cpusize * N),
-      recv_ref(cpusize * N);
-
-  for (int i = 0; i < N; i++)
-    sendbuf[i] = myrank * 100 + i;
-
-  my_MPI_Allgather_ring(sendbuf.data(), N, MPI_INT, recv_ring.data(), N,
-                        MPI_INT);
-  my_MPI_Allgather_gb(sendbuf.data(), N, MPI_INT, recv_gb.data(), N, MPI_INT);
-  MPI_Allgather(sendbuf.data(), N, MPI_INT, recv_ref.data(), N, MPI_INT,
-                MPI_COMM_WORLD);
-
-  int ring_ok = (recv_ring == recv_ref);
-  int gb_ok = (recv_gb == recv_ref);
-
-  if (myrank == 0) {
-    printf("cpusize=%d\n", cpusize);
-    for (int r = 0; r < cpusize; r++) {
-      printf("from rank %d: ", r);
-      for (int i = 0; i < N; i++)
-        printf("%d ", recv_ring[r * N + i]);
-      printf("\n");
+  if (argc != 2) {
+    if (myrank == 0)
+      fprintf(stderr, "Usage:   %s buffersize[K|M|G]\n", argv[0]);
+    MPI_Finalize();
+    exit(1);
+  } else {
+    char *p;
+    size = strtol(argv[1], &p, 10);
+    switch (toupper(*p)) {
+    case 'G':
+      size *= 1024;
+    case 'M':
+      size *= 1024;
+    case 'K':
+      size *= 1024;
+      break;
     }
   }
+  if (size <= 0) {
+    fprintf(stderr, "Process %d: invalid size %zu\n", myrank, size);
+    MPI_Abort(MPI_COMM_WORLD, 1);
+  }
 
-  int all_ok = 0;
-  MPI_Reduce(&ring_ok, &all_ok, 1, MPI_INT, MPI_LAND, 0, MPI_COMM_WORLD);
-  if (myrank == 0)
-    printf("ring allgather: %s\n", all_ok ? "PASS" : "FAIL");
+  if (myrank == 0) {
+    fprintf(stderr, "Allgather with %d processes, buffer size: %zu bytes\n",
+            nprocs, size);
+  }
 
-  all_ok = 0;
-  MPI_Reduce(&gb_ok, &all_ok, 1, MPI_INT, MPI_LAND, 0, MPI_COMM_WORLD);
+  send_buffer = (byte *)malloc(size);
+  recv_buffer = (byte *)malloc(nprocs * size);
+  if (send_buffer == NULL || recv_buffer == NULL) {
+    fprintf(stderr, "Process %d: memory allocation error!\n", myrank);
+    MPI_Abort(MPI_COMM_WORLD, 1);
+  }
+
+  memset(send_buffer, myrank + 1, size);
+
+  // Ring algorithm
+  memset(recv_buffer, 0, nprocs * size);
+  MPI_Barrier(MPI_COMM_WORLD);
+  time0 = MPI_Wtime();
+  my_MPI_Allgather_ring(send_buffer, size, MPI_BYTE, recv_buffer, size,
+                        MPI_BYTE);
+  MPI_Barrier(MPI_COMM_WORLD);
+  time1 = MPI_Wtime();
   if (myrank == 0)
-    printf("gather+bcast allgather: %s\n", all_ok ? "PASS" : "FAIL");
+    fprintf(stderr, "The circular algorithm: wall time = %lf\n", time1 - time0);
+  check(nprocs, myrank, size, recv_buffer);
+
+  // Gather+Bcast algorithm
+  memset(recv_buffer, 0, nprocs * size);
+  MPI_Barrier(MPI_COMM_WORLD);
+  time0 = MPI_Wtime();
+  my_MPI_Allgather_gb(send_buffer, size, MPI_BYTE, recv_buffer, size, MPI_BYTE);
+  MPI_Barrier(MPI_COMM_WORLD);
+  time1 = MPI_Wtime();
+  if (myrank == 0)
+    fprintf(stderr, "Gather+Bcast: wall time = %lf\n", time1 - time0);
+  check(nprocs, myrank, size, recv_buffer);
+
+  // MPI_Allgather
+  memset(recv_buffer, 0, nprocs * size);
+  MPI_Barrier(MPI_COMM_WORLD);
+  time0 = MPI_Wtime();
+  MPI_Allgather(send_buffer, size, MPI_BYTE, recv_buffer, size, MPI_BYTE,
+                MPI_COMM_WORLD);
+  MPI_Barrier(MPI_COMM_WORLD);
+  time1 = MPI_Wtime();
+  if (myrank == 0)
+    fprintf(stderr, "MPI_Allgather: wall time = %lf\n", time1 - time0);
+  check(nprocs, myrank, size, recv_buffer);
+
+  free(send_buffer);
+  free(recv_buffer);
 
   MPI_Finalize();
   return 0;
