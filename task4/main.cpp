@@ -1,4 +1,5 @@
 #include <ctype.h>
+#include <limits.h>
 #include <mpi.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,8 +16,8 @@ void my_MPI_Allgather_ring(const void *sendbuf, int sendcount,
   int type_size;
   MPI_Type_size(sendtype, &type_size);
 
-  memcpy((char *)recvbuf + myrank * recvcount * type_size, sendbuf,
-         sendcount * type_size);
+  memcpy((char *)recvbuf + (size_t)myrank * recvcount * type_size, sendbuf,
+         (size_t)sendcount * type_size);
 
   int prev = (myrank + cpusize - 1) % cpusize;
   int next = (myrank + 1) % cpusize;
@@ -26,14 +27,14 @@ void my_MPI_Allgather_ring(const void *sendbuf, int sendcount,
     int recv_src = (myrank - step + cpusize) % cpusize;
 
     if (myrank % 2 == 0) {
-      MPI_Send((char *)recvbuf + send_src * recvcount * type_size, sendcount,
+      MPI_Send((char *)recvbuf + (size_t)send_src * recvcount * type_size, sendcount,
                sendtype, next, 0, MPI_COMM_WORLD);
-      MPI_Recv((char *)recvbuf + recv_src * recvcount * type_size, recvcount,
+      MPI_Recv((char *)recvbuf + (size_t)recv_src * recvcount * type_size, recvcount,
                recvtype, prev, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     } else {
-      MPI_Recv((char *)recvbuf + recv_src * recvcount * type_size, recvcount,
+      MPI_Recv((char *)recvbuf + (size_t)recv_src * recvcount * type_size, recvcount,
                recvtype, prev, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-      MPI_Send((char *)recvbuf + send_src * recvcount * type_size, sendcount,
+      MPI_Send((char *)recvbuf + (size_t)send_src * recvcount * type_size, sendcount,
                sendtype, next, 0, MPI_COMM_WORLD);
     }
   }
@@ -47,12 +48,12 @@ void my_MPI_Gather(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
   MPI_Type_size(sendtype, &type_size);
 
   if (myrank == root) {
-    memcpy((char *)recvbuf + root * recvcount * type_size, sendbuf,
+    memcpy((char *)recvbuf + (size_t)root * recvcount * type_size, sendbuf,
            sendcount * type_size);
     for (int i = 0; i < cpusize; i++) {
       if (i == root)
         continue;
-      MPI_Recv((char *)recvbuf + i * recvcount * type_size, recvcount, recvtype,
+      MPI_Recv((char *)recvbuf + (size_t)i * recvcount * type_size, recvcount, recvtype,
                i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     }
   } else {
@@ -60,24 +61,32 @@ void my_MPI_Gather(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
   }
 }
 
-void my_MPI_Bcast(void *data, int count, MPI_Datatype datatype, int root) {
+void my_MPI_Bcast(void *data, size_t count, MPI_Datatype datatype, int root) {
   int rel_rank = (myrank - root + cpusize) % cpusize;
-  if (rel_rank != 0) {
-    int parent = ((rel_rank - 1) / 2 + root) % cpusize;
-    MPI_Recv(data, count, datatype, parent, 0, MPI_COMM_WORLD,
-             MPI_STATUS_IGNORE);
-  }
 
-  int rel_child1 = 2 * rel_rank + 1;
-  int rel_child2 = 2 * rel_rank + 2;
+  size_t offset = 0;
+  while (offset < count) {
+    int chunk = (count - offset > (size_t)INT_MAX) ? INT_MAX : (int)(count - offset);
 
-  if (rel_child1 < cpusize) {
-    int child1 = (rel_child1 + root) % cpusize;
-    MPI_Send(data, count, datatype, child1, 0, MPI_COMM_WORLD);
-  }
-  if (rel_child2 < cpusize) {
-    int child2 = (rel_child2 + root) % cpusize;
-    MPI_Send(data, count, datatype, child2, 0, MPI_COMM_WORLD);
+    if (rel_rank != 0) {
+      int parent = ((rel_rank - 1) / 2 + root) % cpusize;
+      MPI_Recv((char *)data + offset, chunk, datatype, parent, 0, MPI_COMM_WORLD,
+               MPI_STATUS_IGNORE);
+    }
+
+    int rel_child1 = 2 * rel_rank + 1;
+    int rel_child2 = 2 * rel_rank + 2;
+
+    if (rel_child1 < cpusize) {
+      int child1 = (rel_child1 + root) % cpusize;
+      MPI_Send((char *)data + offset, chunk, datatype, child1, 0, MPI_COMM_WORLD);
+    }
+    if (rel_child2 < cpusize) {
+      int child2 = (rel_child2 + root) % cpusize;
+      MPI_Send((char *)data + offset, chunk, datatype, child2, 0, MPI_COMM_WORLD);
+    }
+
+    offset += chunk;
   }
 }
 
@@ -85,7 +94,7 @@ void my_MPI_Allgather_gb(const void *sendbuf, int sendcount,
                          MPI_Datatype sendtype, void *recvbuf, int recvcount,
                          MPI_Datatype recvtype) {
   my_MPI_Gather(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, 0);
-  my_MPI_Bcast(recvbuf, cpusize * recvcount, recvtype, 0);
+  my_MPI_Bcast(recvbuf, (size_t)cpusize * recvcount, recvtype, 0);
 }
 
 /* 校验: 第 j 块的值应等于 j + 1 */
@@ -143,7 +152,7 @@ int main(int argc, char **argv) {
   }
 
   send_buffer = (byte *)malloc(size);
-  recv_buffer = (byte *)malloc(nprocs * size);
+  recv_buffer = (byte *)malloc((size_t)nprocs * size);
   if (send_buffer == NULL || recv_buffer == NULL) {
     fprintf(stderr, "Process %d: memory allocation error!\n", myrank);
     MPI_Abort(MPI_COMM_WORLD, 1);
@@ -152,7 +161,7 @@ int main(int argc, char **argv) {
   memset(send_buffer, myrank + 1, size);
 
   // Ring algorithm
-  memset(recv_buffer, 0, nprocs * size);
+  memset(recv_buffer, 0, (size_t)nprocs * size);
   MPI_Barrier(MPI_COMM_WORLD);
   time0 = MPI_Wtime();
   my_MPI_Allgather_ring(send_buffer, size, MPI_BYTE, recv_buffer, size,
@@ -164,7 +173,7 @@ int main(int argc, char **argv) {
   check(nprocs, myrank, size, recv_buffer);
 
   // Gather+Bcast algorithm
-  memset(recv_buffer, 0, nprocs * size);
+  memset(recv_buffer, 0, (size_t)nprocs * size);
   MPI_Barrier(MPI_COMM_WORLD);
   time0 = MPI_Wtime();
   my_MPI_Allgather_gb(send_buffer, size, MPI_BYTE, recv_buffer, size, MPI_BYTE);
@@ -175,7 +184,7 @@ int main(int argc, char **argv) {
   check(nprocs, myrank, size, recv_buffer);
 
   // MPI_Allgather
-  memset(recv_buffer, 0, nprocs * size);
+  memset(recv_buffer, 0, (size_t)nprocs * size);
   MPI_Barrier(MPI_COMM_WORLD);
   time0 = MPI_Wtime();
   MPI_Allgather(send_buffer, size, MPI_BYTE, recv_buffer, size, MPI_BYTE,
