@@ -23,16 +23,17 @@ static inline int *alloc_int(size_t n) {
 }
 
 struct CSR {
-  int n;
+  int n;    // rows
+  int m;    // cols
   int nnz;
   float *val;
   int *col_idx;
   int *row_ptr;
 
-  CSR() : n(0), nnz(0), val(nullptr), col_idx(nullptr), row_ptr(nullptr) {}
+  CSR() : n(0), m(0), nnz(0), val(nullptr), col_idx(nullptr), row_ptr(nullptr) {}
 
   CSR(CSR &&o) noexcept
-      : n(o.n), nnz(o.nnz), val(o.val), col_idx(o.col_idx), row_ptr(o.row_ptr) {
+      : n(o.n), m(o.m), nnz(o.nnz), val(o.val), col_idx(o.col_idx), row_ptr(o.row_ptr) {
     o.val = nullptr;
     o.col_idx = nullptr;
     o.row_ptr = nullptr;
@@ -43,6 +44,7 @@ struct CSR {
       free(col_idx);
       free(row_ptr);
       n = o.n;
+      m = o.m;
       nnz = o.nnz;
       val = o.val;
       col_idx = o.col_idx;
@@ -67,6 +69,7 @@ CSR generate_laplacian(int grid_size) {
   int N = grid_size * grid_size;
   CSR A;
   A.n = N;
+  A.m = N;
   A.row_ptr = alloc_int(N + 1);
   memset(A.row_ptr, 0, (N + 1) * sizeof(int));
 
@@ -101,6 +104,7 @@ CSR generate_laplacian(int grid_size) {
 CSR generate_random_banded(int N, int band_width, int nnz_per_row) {
   CSR A;
   A.n = N;
+  A.m = N;
   A.row_ptr = alloc_int(N + 1);
 
   nnz_per_row = min(nnz_per_row, band_width);
@@ -137,6 +141,7 @@ CSR generate_random_banded(int N, int band_width, int nnz_per_row) {
 CSR generate_erdos_renyi(int N, double p) {
   CSR A;
   A.n = N;
+  A.m = N;
   A.row_ptr = alloc_int(N + 1);
 
   unsigned seed = 12345;
@@ -177,6 +182,7 @@ CSR generate_erdos_renyi(int N, double p) {
 CSR generate_power_law(int N, int nnz_per_row) {
   CSR A;
   A.n = N;
+  A.m = N;
   A.row_ptr = alloc_int(N + 1);
 
   for (int i = 0; i < N; i++)
@@ -235,18 +241,19 @@ void spmv_omp(const CSR &A, const float *x, float *y) {
 
 // ======== ELLPACK 格式 ========
 struct ELL {
-  int n;
+  int n;    // rows
+  int m;    // cols
   int max_nnz;
   float *val;
   int *col;
 
-  ELL() : n(0), max_nnz(0), val(nullptr), col(nullptr) {}
-  ELL(ELL &&o) noexcept : n(o.n), max_nnz(o.max_nnz), val(o.val), col(o.col) {
+  ELL() : n(0), m(0), max_nnz(0), val(nullptr), col(nullptr) {}
+  ELL(ELL &&o) noexcept : n(o.n), m(o.m), max_nnz(o.max_nnz), val(o.val), col(o.col) {
     o.val = nullptr; o.col = nullptr;
   }
   ELL &operator=(ELL &&o) noexcept {
     if (this != &o) { free(val); free(col);
-      n = o.n; max_nnz = o.max_nnz; val = o.val; col = o.col;
+      n = o.n; m = o.m; max_nnz = o.max_nnz; val = o.val; col = o.col;
       o.val = nullptr; o.col = nullptr; }
     return *this;
   }
@@ -258,6 +265,7 @@ struct ELL {
 ELL csr_to_ell(const CSR &A) {
   ELL E;
   E.n = A.n;
+  E.m = A.m;
 
   int max_len = 0;
   for (int i = 0; i < A.n; i++) {

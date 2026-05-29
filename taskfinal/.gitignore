@@ -1,0 +1,7 @@
+build/
+spmv
+spmv_single
+spmv_eigen
+spmv_mpi
+*.o
+testcases/

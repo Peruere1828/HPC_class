@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "csr.h"
+#include "mmio.h"
 
 using namespace std;
 using namespace chrono;
@@ -56,11 +57,14 @@ double bench_ell_omp(const ELL &E, const float *x, float *y, int reptime) {
   return total / reptime;
 }
 
-void run_bench(const char *name, CSR &A, int N, int reptime) {
-  vector<float> xv(N), yv(N), y_refv(N);
+void run_bench(const char *name, CSR &A) {
+  int N = A.n;
+  int M = A.m;
+  int reptime = N > 500000 ? 50 : N > 100000 ? 200 : 500;
+  vector<float> xv(M), yv(N), y_refv(N);
   float *x = xv.data(), *y = yv.data(), *y_ref = y_refv.data();
 
-  for (int i = 0; i < N; i++)
+  for (int i = 0; i < M; i++)
     x[i] = (i % 100) / 10.0f;
 
   // CSR benchmark
@@ -69,64 +73,75 @@ void run_bench(const char *name, CSR &A, int N, int reptime) {
   memcpy(y_ref, y, N * sizeof(float));
   double t_o = bench_omp(A, x, y, reptime);
 
-  // ELLPACK benchmark
-  ELL E = csr_to_ell(A);
-  double t_ell_s = bench_ell_serial(E, x, y, reptime);
-  double t_ell_o = bench_ell_omp(E, x, y, reptime);
+  // ELLPACK benchmark - commented out for now
+  // int max_len = 0;
+  // for (int i = 0; i < N; i++) {
+  //   int len = A.row_ptr[i + 1] - A.row_ptr[i];
+  //   if (len > max_len) max_len = len;
+  // }
+  // ELL E = csr_to_ell(A);
+  // double t_ell_s = bench_ell_serial(E, x, y, reptime);
+  // double t_ell_o = bench_ell_omp(E, x, y, reptime);
 
-  // verify ELL correctness
-  vector<float> y_ell(N);
-  spmv_ell(E, x, y_ell.data());
-  float err = 0;
-  for (int i = 0; i < N; i++) err = max(err, fabsf(y_ell[i] - y_ref[i]));
+  printf("%-20s  %7d  %10d  %8.4f  %8.4f  %5.1fx\n",
+         name, N, A.nnz,
+         t_s, t_o, t_s / t_o);
+}
 
-  printf("%-16s  %7d  %10d  %3d  %8.4f  %8.4f  %5.1fx  %8.4f  %8.4f  %5.1fx  %s\n",
-         name, N, A.nnz, E.max_nnz,
-         t_s, t_o, t_s / t_o,
-         t_ell_s, t_ell_o, t_ell_s / t_ell_o,
-         err < 1e-5f ? "OK" : "FAIL");
+void print_header() {
+  printf("%-20s  %7s  %10s  %8s  %8s  %5s\n",
+         "matrix", "N", "nnz", "csr(s)", "csr_omp", "speed");
+  printf("----------------------------------------------------------------\n");
 }
 
 int main(int argc, char *argv[]) {
   int nthreads = 4;
   if (argc > 1) nthreads = atoi(argv[1]);
 
-  const int REPTIME = 500;
   omp_set_num_threads(nthreads);
 
-  printf("%-16s  %7s  %10s  %3s  %8s  %8s  %5s  %8s  %8s  %5s  %s\n",
-         "matrix", "N", "nnz", "max",
-         "csr(s)", "csr_omp", "speed", "ell(s)", "ell_omp", "speed", "check");
-  printf("--------------------------------------------------------------------------------------------------------------\n");
+  print_header();
 
-  {
-    int gs = 2000, N = gs * gs;
-    CSR A = generate_laplacian(gs);
-    run_bench("Laplacian", A, N, REPTIME);
+  // load .mtx files from command line: ./spmv 4 file1.mtx file2.mtx ...
+  for (int i = 2; i < argc; i++) {
+    CSR A = load_mm(argv[i]);
+    const char *name = argv[i];
+    const char *slash = strrchr(name, '/');
+    if (slash) name = slash + 1;
+    char buf[256];
+    strncpy(buf, name, sizeof(buf));
+    char *dot = strrchr(buf, '.');
+    if (dot) *dot = '\0';
+    run_bench(buf, A);
   }
 
-  {
-    int N = 2000000;
-    CSR A = generate_random_banded(N, 100, 10);
-    run_bench("Banded-narrow", A, N, REPTIME);
-  }
-
-  {
-    int N = 1000000;
-    CSR A = generate_random_banded(N, 2000, 50);
-    run_bench("Banded-wide", A, N, REPTIME);
-  }
-
-  {
-    int N = 3000;
-    CSR A = generate_erdos_renyi(N, 0.005);
-    run_bench("ErdosRenyi", A, N, REPTIME);
-  }
-
-  {
-    int N = 2000000;
-    CSR A = generate_power_law(N, 10);
-    run_bench("PowerLaw", A, N, REPTIME);
+  // if no mtx files given, run built-in generators
+  if (argc <= 2) {
+    {
+      int gs = 2000, N = gs * gs;
+      CSR A = generate_laplacian(gs);
+      run_bench("Laplacian", A);
+    }
+    {
+      int N = 2000000;
+      CSR A = generate_random_banded(N, 100, 10);
+      run_bench("Banded-narrow", A);
+    }
+    {
+      int N = 1000000;
+      CSR A = generate_random_banded(N, 2000, 50);
+      run_bench("Banded-wide", A);
+    }
+    {
+      int N = 3000;
+      CSR A = generate_erdos_renyi(N, 0.005);
+      run_bench("ErdosRenyi", A);
+    }
+    {
+      int N = 2000000;
+      CSR A = generate_power_law(N, 10);
+      run_bench("PowerLaw", A);
+    }
   }
 
   return 0;
