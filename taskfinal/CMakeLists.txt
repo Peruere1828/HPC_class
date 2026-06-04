@@ -29,8 +29,5 @@ FetchContent_MakeAvailable(eigen)
 add_executable(spmv spmv.cpp csr.h mmio.h)
 target_link_libraries(spmv PRIVATE OpenMP::OpenMP_CXX)
 
-add_executable(spmv_single spmv_single.cpp csr.h)
-target_link_libraries(spmv_single PRIVATE OpenMP::OpenMP_CXX)
-
 add_executable(spmv_eigen spmv_eigen.cpp csr.h)
 target_link_libraries(spmv_eigen PRIVATE OpenMP::OpenMP_CXX Eigen3::Eigen)

@@ -77,8 +77,15 @@ void run_bench(const char *name, CSR &A, int nthreads) {
   for (int i = 0; i < N; i++)
     err = max(err, fabsf(y[i] - ey(i)));
 
-  printf("%-20s  %7d  %10d  %8.4f  %8.4f  %8.4f  %5.1fx  %5.1fx  %s\n",
+  // SpMV: 每个非零元 = 1 次乘法 + 1 次加法 = 2 FLOPs
+  double flops_per_spmv = 2.0 * A.nnz;
+  double gflops_csr  = flops_per_spmv / (t_csr * 1e9);
+  double gflops_omp  = flops_per_spmv / (t_omp * 1e9);
+  double gflops_eig  = flops_per_spmv / (t_eig * 1e9);
+
+  printf("%-20s  %7d  %10d  %8.4f  %8.4f  %8.4f  %7.2f  %7.2f  %7.2f  %5.1fx  %5.1fx  %s\n",
          name, N, A.nnz, t_csr * 1000, t_omp * 1000, t_eig * 1000,
+         gflops_csr, gflops_omp, gflops_eig,
          t_csr / t_omp, t_csr / t_eig,
          err < 1e-3f ? "OK" : "FAIL");
 }
@@ -89,9 +96,10 @@ int main(int argc, char *argv[]) {
 
   omp_set_num_threads(nthreads);
 
-  printf("%-20s  %7s  %10s  %8s  %8s  %8s  %5s  %5s  %s\n",
-         "matrix", "N", "nnz", "csr(ms)", "omp(ms)", "eig(ms)", "omp↑", "eig↑", "chk");
-  printf("------------------------------------------------------------------------------------\n");
+  printf("%-20s  %7s  %10s  %8s  %8s  %8s  %7s  %7s  %7s  %5s  %5s  %s\n",
+         "matrix", "N", "nnz", "csr(ms)", "omp(ms)", "eig(ms)",
+         "csr_gf", "omp_gf", "eig_gf", "omp↑", "eig↑", "chk");
+  printf("----------------------------------------------------------------------------------------------------\n");
 
   // load .mtx files
   for (int i = 2; i < argc; i++) {

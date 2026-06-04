@@ -5,3 +5,4 @@ spmv_eigen
 spmv_mpi
 *.o
 testcases/
+Eigen/

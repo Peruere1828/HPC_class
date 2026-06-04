@@ -64,5 +64,6 @@ Testing/
 .cache/
 
 main
+spmv_bench.tar.gz
 
 .vscode/
