@@ -12,14 +12,14 @@ using namespace std;
 
 // 64-byte aligned allocation (cache line size)
 static inline float *alloc_float(size_t n) {
-  void *p = nullptr;
-  (void)posix_memalign(&p, 64, n * sizeof(float));
-  return (float *)p;
+  size_t bytes = n * sizeof(float);
+  if (bytes % 64) bytes = ((bytes / 64) + 1) * 64;
+  return (float *)aligned_alloc(64, bytes);
 }
 static inline int *alloc_int(size_t n) {
-  void *p = nullptr;
-  (void)posix_memalign(&p, 64, n * sizeof(int));
-  return (int *)p;
+  size_t bytes = n * sizeof(int);
+  if (bytes % 64) bytes = ((bytes / 64) + 1) * 64;
+  return (int *)aligned_alloc(64, bytes);
 }
 
 struct CSR {
@@ -109,6 +109,7 @@ CSR generate_random_banded(int N, int band_width, int nnz_per_row) {
 
   nnz_per_row = min(nnz_per_row, band_width);
 
+  A.row_ptr[0] = 0;
   for (int i = 0; i < N; i++)
     A.row_ptr[i + 1] = A.row_ptr[i] + nnz_per_row;
 
@@ -185,6 +186,7 @@ CSR generate_power_law(int N, int nnz_per_row) {
   A.m = N;
   A.row_ptr = alloc_int(N + 1);
 
+  A.row_ptr[0] = 0;
   for (int i = 0; i < N; i++)
     A.row_ptr[i + 1] = A.row_ptr[i] + nnz_per_row;
 

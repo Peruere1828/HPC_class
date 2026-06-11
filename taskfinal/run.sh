@@ -43,6 +43,14 @@ for nth in 1 2 4 8 16 20; do
   echo ""
   echo ">>> Built-in generators + Real matrices (spmv_eigen):"
   ./spmv_eigen $nth $MTX_FILES
+
+  echo ""
+  echo ">>> Built-in generators (spmv_csc):"
+  ./spmv_csc $nth
+
+  echo ""
+  echo ">>> Built-in generators + Real matrices (spmv_csc_eigen):"
+  ./spmv_csc_eigen $nth $MTX_FILES
 done
 
 echo ""

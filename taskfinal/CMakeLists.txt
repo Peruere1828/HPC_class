@@ -31,3 +31,9 @@ target_link_libraries(spmv PRIVATE OpenMP::OpenMP_CXX)
 
 add_executable(spmv_eigen spmv_eigen.cpp csr.h)
 target_link_libraries(spmv_eigen PRIVATE OpenMP::OpenMP_CXX Eigen3::Eigen)
+
+add_executable(spmv_csc spmv_csc.cpp csr.h csc.h mmio.h)
+target_link_libraries(spmv_csc PRIVATE OpenMP::OpenMP_CXX)
+
+add_executable(spmv_csc_eigen spmv_csc_eigen.cpp csr.h csc.h)
+target_link_libraries(spmv_csc_eigen PRIVATE OpenMP::OpenMP_CXX Eigen3::Eigen)
